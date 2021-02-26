@@ -4,4 +4,4 @@ metadata:
   name: kubia
 spec:
   gitRepo: https://github.com/nevermosby/kubia-website-example.git
-  replicas: 1
+  replicas: 2

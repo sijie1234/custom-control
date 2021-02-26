@@ -12,6 +12,7 @@ import (
 	clientset "gitweb/pkg/client/clientset/versioned"
 	"k8s.io/client-go/informers"
 	pwinformers "gitweb/pkg/client/informers/externalversions"
+	"gitweb/pkg"
 )
 var (
 	masterURL  string
@@ -36,8 +37,9 @@ func main() {
 	}))
 	podInformer := informerFactory.Core().V1().Pods()
 	gwInformerFactory := pwinformers.NewSharedInformerFactory(gwclient,time.Second*30)
-	controller := NewGitWebController(kubeclient,gwInformerFactory.Samplecrd().V1().Foos(),podInformer,gwclient)
+	controller := pkg.NewGitWebController(kubeclient,gwInformerFactory.Samplecrd().V1().Foos(),podInformer,gwclient)
 	go gwInformerFactory.Start(stopCh)
+	go informerFactory.Start(stopCh)
 	controller.Run(stopCh)
 }
 
