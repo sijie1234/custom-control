@@ -6,13 +6,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/kubernetes/staging/src/k8s.io/sample-controller/pkg/signals"
-
 	"log"
 	clientset "gitweb/pkg/client/clientset/versioned"
 	"k8s.io/client-go/informers"
 	pwinformers "gitweb/pkg/client/informers/externalversions"
+	kubeinformers "k8s.io/client-go/informers"
 	"gitweb/pkg"
+	"os/signal"
+	"os"
+	"syscall"
 )
 var (
 	masterURL  string
@@ -21,7 +23,7 @@ var (
 
 func main() {
 	flag.Parse()
-	stopCh := signals.SetupSignalHandler()
+	stopCh := SetupSignalHandler()
 	kubeConfigPath := "/Users/sijie/.kube/config"
 	cfg,err := clientcmd.BuildConfigFromFlags(masterURL,kubeConfigPath)
 	if err != nil {
@@ -35,6 +37,7 @@ func main() {
 	}
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeclient, 0, informers.WithTweakListOptions(func(opt *metav1.ListOptions) {
 	}))
+	informerFactory = kubeinformers.NewSharedInformerFactory(kubeclient, time.Second*30)
 	podInformer := informerFactory.Core().V1().Pods()
 	gwInformerFactory := pwinformers.NewSharedInformerFactory(gwclient,time.Second*30)
 	controller := pkg.NewGitWebController(kubeclient,gwInformerFactory.Samplecrd().V1().Foos(),podInformer,gwclient)
@@ -43,4 +46,21 @@ func main() {
 	controller.Run(stopCh)
 }
 
+var onlyOneSignalHandler = make(chan struct{})
 
+var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+func SetupSignalHandler() (stopCh <-chan struct{}) {
+	close(onlyOneSignalHandler) // panics when called twice
+
+	stop := make(chan struct{})
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, shutdownSignals...)
+	go func() {
+		<-c
+		close(stop)
+		<-c
+		os.Exit(1) // second signal. Exit directly.
+	}()
+
+	return stop
+}

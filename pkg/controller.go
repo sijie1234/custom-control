@@ -106,9 +106,9 @@ func (c *Controller) processNextWorkItem() bool {
 	}(obj)
 	if err != nil {
 		runtime.HandleError(err)
-		return true
+		return false
 	}
-	return true
+	return false
 }
 
 func (c *Controller) syncHandler(key string) error {
@@ -127,8 +127,9 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 	gw := gitweb.DeepCopy()
-	selector := labels.Set(map[string]string{"gitwebsite": gw.Name}).AsSelector()
-	pods, err := c.podLister.List(selector)
+	selector := labels.Set(map[string]string{"gitwebsite":gw.Name}).AsSelector()
+	fmt.Println(selector)
+	pods, err := c.podLister.Pods(gw.Namespace).List(selector)
 	alive, noalive, failed := AcculatePod(pods)
 	if noalive > 5 {
 		log.Println("非running 太多，待运行")
