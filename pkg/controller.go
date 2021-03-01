@@ -141,6 +141,8 @@ func (c *Controller) syncHandler(key string) error {
 			log.Println("GitWeb Create pod failed,reason:%v", err)
 			return err
 		}
+		gw.Status.AvailableReplicas ++
+		_, err = c.gitwebclientset.SamplecrdV1().Foos(gitweb.Namespace).Create(context.Background(), gw, metav1.CreateOptions{})
 	}
 	if failed != 0 {
 		for _, pod := range pods {
