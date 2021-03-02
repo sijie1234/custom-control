@@ -65,7 +65,7 @@ func (ctr *Controller) Run(stop <-chan struct{}) error {
 	defer runtime.HandleCrash()
 	defer ctr.pgQueue.ShutDown()
 	log.Println("Starting gitweb control loop")
-	if ok := cache.WaitForCacheSync(stop, ctr.gitwebListSynced); !ok {
+	if ok := cache.WaitForCacheSync(stop, ctr.gitwebListSynced,ctr.podListSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 	log.Println("Starting workers")
@@ -130,7 +130,7 @@ func (c *Controller) syncHandler(key string) error {
 	selector := labels.Set(map[string]string{"gitwebsite":gw.Name}).AsSelector()
 	fmt.Println(selector)
 	pods, err := c.podLister.Pods(gw.Namespace).List(selector)
-	alive, noalive, failed := AcculatePod(pods)
+	alive, noalive, failed,runnings,faileds := AcculatePod(pods)
 	if noalive > 5 {
 		log.Println("非running 太多，待运行")
 		return fmt.Errorf("非running 太多，待运行")
@@ -141,12 +141,33 @@ func (c *Controller) syncHandler(key string) error {
 			log.Println("GitWeb Create pod failed,reason:%v", err)
 			return err
 		}
-		gw.Status.AvailableReplicas ++
-		_, err = c.gitwebclientset.SamplecrdV1().Foos(gitweb.Namespace).Create(context.Background(), gw, metav1.CreateOptions{})
+		gw.Status.AvailableReplicas  = alive + 1
+		_, err = c.gitwebclientset.SamplecrdV1().Foos(gitweb.Namespace).Update(context.Background(), gw, metav1.UpdateOptions{})
+		if err != nil {
+			log.Panicln("update ",gw.Name," error,error:",err.Error())
+			return nil
+		}
 	}
 	if failed != 0 {
-		for _, pod := range pods {
-			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(nil, pod.Name, metav1.DeleteOptions{})
+		for  pod,_ := range faileds {
+			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(nil, pod, metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+			delete(faileds,pod)
+		}
+	}
+	if gw.Status.AvailableReplicas > *gw.Spec.Replicas {
+		num := gw.Status.AvailableReplicas - *gw.Spec.Replicas
+		temp := make(map[int32]string)
+		var tempInt int32 = 1
+		for pod,_ := range runnings {
+			temp[tempInt] = pod
+			tempInt ++
+		}
+		var i int32
+		for i =1; i <= num; i ++ {
+			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(nil, temp[i], metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
@@ -261,21 +282,24 @@ func newPod1(webgit *gitv1.Foo) *v1.Pod {
 	}
 }
 
-func AcculatePod(pods []*v1.Pod) (int32, int32, int32) {
+func AcculatePod(pods []*v1.Pod) (int32, int32, int32,map[string]int32,map[string]int32) {
 	var alive int32
 	var notAlive int32
 	var failed int32
+	running := make(map[string]int32)
+	faileds := make(map[string]int32)
+
+
 	for _, pod := range pods {
-		if pod.Status.Phase == v1.PodRunning {
+		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending{
 			alive++
+			running[pod.Name] ++
 		} else {
-			notAlive++
-			if pod.Status.Phase == v1.PodFailed {
-				failed++
-			}
+			failed ++
+			faileds[pod.Name] ++
 		}
 	}
-	return alive, notAlive, failed
+	return alive, notAlive, failed,running,faileds
 }
 
 func (c *Controller) addGitWeb(obj interface{}) {
