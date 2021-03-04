@@ -28,6 +28,10 @@ import (
 
 const controllerAgentName = "gitweb-controller"
 
+var (
+	DefaultPendingSecodns int32 = 120
+	Pending = make(map[string]int32)
+)
 type Controller struct {
 	kubeclientset    kubernetes.Interface
 	gitwebclientset  clientset.Interface
@@ -130,7 +134,7 @@ func (c *Controller) syncHandler(key string) error {
 	selector := labels.Set(map[string]string{"gitwebsite":gw.Name}).AsSelector()
 	fmt.Println(selector)
 	pods, err := c.podLister.Pods(gw.Namespace).List(selector)
-	alive, noalive, failed,runnings,faileds := AcculatePod(pods)
+	alive, noalive, failed,runnings,faileds,pendings := AcculatePod(pods)
 	if noalive > 5 {
 		log.Println("非running 太多，待运行")
 		return fmt.Errorf("非running 太多，待运行")
@@ -150,7 +154,7 @@ func (c *Controller) syncHandler(key string) error {
 	}
 	if failed != 0 {
 		for  pod,_ := range faileds {
-			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(nil, pod, metav1.DeleteOptions{})
+			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(context.Background(), pod, metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
@@ -167,7 +171,7 @@ func (c *Controller) syncHandler(key string) error {
 		}
 		var i int32
 		for i =1; i <= num; i ++ {
-			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(nil, temp[i], metav1.DeleteOptions{})
+			err = c.kubeclientset.CoreV1().Pods(gitweb.Namespace).Delete(context.Background(), temp[i], metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
@@ -282,24 +286,27 @@ func newPod1(webgit *gitv1.Foo) *v1.Pod {
 	}
 }
 
-func AcculatePod(pods []*v1.Pod) (int32, int32, int32,map[string]int32,map[string]int32) {
+func AcculatePod(pods []*v1.Pod) (int32, int32, int32,map[string]int32,map[string]int32,map[string]int32) {
 	var alive int32
 	var notAlive int32
 	var failed int32
 	running := make(map[string]int32)
 	faileds := make(map[string]int32)
+	pendings := make(map[string]int32)
 
 
 	for _, pod := range pods {
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending{
 			alive++
-			running[pod.Name] ++
-		} else {
+			running[pod.Name] = 0
+		} else if pod.Status.Phase == v1.PodPending{
+			pendings[pod.Name]  = 0
+		}else{
 			failed ++
-			faileds[pod.Name] ++
+			faileds[pod.Name]  = 1
 		}
 	}
-	return alive, notAlive, failed,running,faileds
+	return alive, notAlive, failed,running,faileds,pendings
 }
 
 func (c *Controller) addGitWeb(obj interface{}) {
